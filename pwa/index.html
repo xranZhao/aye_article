@@ -1,0 +1,727 @@
+<!---
+  aye写作 · 极简写作 + AI标题 + GitHub上传
+  v1.1 - 保存即生成标题，设置浮层，路径修正
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#faf8f5">
+<title>aye写作</title>
+<link rel="manifest" href="manifest.json">
+<style>
+  :root {
+    --bg: #faf8f5;
+    --card: #ffffff;
+    --text: #2c2416;
+    --text-dim: #8b7e6a;
+    --accent: #c46b3c;
+    --accent-hover: #a8582e;
+    --border: #e8e0d5;
+    --radius: 12px;
+    --safe-bottom: env(safe-area-inset-bottom, 16px);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+
+  /* ── 顶栏 ── */
+  .header {
+    position: sticky; top: 0; z-index: 10;
+    padding: 12px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: rgba(250,248,245,0.92);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .header h1 {
+    font-size: 18px; font-weight: 600; letter-spacing: -0.3px;
+  }
+  .btn-icon {
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: var(--card); font-size: 16px; cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text);
+  }
+  .btn-icon:active { background: var(--border); transform: scale(0.95); }
+
+  /* ── 主内容 ── */
+  .main {
+    max-width: 600px; margin: 0 auto;
+    padding: 0 20px 40px;
+    min-height: calc(100vh - 140px);
+  }
+
+  /* ── 编辑器 ── */
+  .editor-wrap {
+    margin-top: 16px;
+  }
+  .editor-wrap textarea {
+    width: 100%; min-height: 260px;
+    padding: 16px; border: 1px solid var(--border); border-radius: var(--radius);
+    font-size: 15px; line-height: 1.75;
+    font-family: inherit; color: var(--text); background: var(--card);
+    resize: vertical; outline: none;
+    transition: border-color 0.2s;
+  }
+  .editor-wrap textarea:focus { border-color: var(--accent); }
+  .editor-wrap textarea::placeholder { color: var(--text-dim); }
+
+  .editor-title, .editor-status, .editor-photos {
+    width: 100%; margin-bottom: 10px; padding: 12px 14px;
+    border: 1px solid var(--border); border-radius: 10px;
+    font: inherit; font-size: 14px; color: var(--text); background: var(--card);
+  }
+  .editor-status { appearance: auto; }
+  .editor-photos { background: var(--bg); }
+  .editor-hint { font-size: 12px; color: var(--text-dim); margin: -4px 2px 12px; line-height: 1.5; }
+
+  .editor-actions {
+    display: flex; gap: 10px; margin-top: 12px;
+  }
+  .btn {
+    min-width: 60px; padding: 14px 24px;
+    border: none; border-radius: var(--radius);
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: -0.2px;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { background: #ccc; }
+  .btn-outline { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: calc(20px + var(--safe-bottom));
+    left: 50%; transform: translateX(-50%);
+    padding: 10px 20px; border-radius: 20px;
+    background: #2c2416; color: #fff; font-size: 13px;
+    opacity: 0; pointer-events: none; transition: opacity 0.3s;
+    z-index: 200;
+  }
+  .toast.show { opacity: 1; }
+  .toast.error { background: #c0392b; }
+
+  /* ── 文章列表 ── */
+  .section-title {
+    margin-top: 32px; font-size: 14px; font-weight: 600;
+    color: var(--text-dim); letter-spacing: 0.5px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .article-list { margin-top: 12px; }
+  .article-item {
+    padding: 14px 16px; margin-bottom: 8px;
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    transition: all 0.15s;
+  }
+  .article-item:active { background: var(--bg); }
+  .article-item .info { flex: 1; min-width: 0; }
+  .article-item .filename { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .article-item .meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .article-item .status {
+    font-size: 11px; padding: 4px 10px; border-radius: 10px;
+    white-space: nowrap;
+  }
+  .status-cloud  { background: #e8f5e9; color: #2e7d32; }
+  .status-local  { background: #fff3e0; color: #e65100; }
+  .status-uploading { background: #e3f2fd; color: #1565c0; }
+
+  .empty-state {
+    text-align: center; padding: 40px 20px; color: var(--text-dim); font-size: 14px;
+  }
+
+  /* ── 遮罩层 ── */
+  .overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.3); z-index: 50;
+    opacity: 0; pointer-events: none; transition: opacity 0.25s;
+  }
+  .overlay.show { opacity: 1; pointer-events: auto; }
+
+  /* ── 底部弹出设置面板 ── */
+  .settings-sheet {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: var(--card);
+    border-radius: 20px 20px 0 0;
+    z-index: 60;
+    padding: 12px 0 calc(20px + var(--safe-bottom)) 0;
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    max-height: 80vh;
+    overflow-y: auto;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+  }
+  .settings-sheet.show { transform: translateY(0); }
+  .settings-sheet .sheet-handle {
+    width: 36px; height: 5px;
+    background: #d0cbc3; border-radius: 3px;
+    margin: 0 auto 16px;
+  }
+  .settings-sheet .sheet-content { padding: 0 24px; }
+  .settings-sheet label {
+    display: block; font-size: 12px; font-weight: 600;
+    color: var(--text-dim); margin-bottom: 4px; margin-top: 14px;
+  }
+  .settings-sheet label:first-child { margin-top: 0; }
+  .settings-sheet input {
+    width: 100%; padding: 11px 14px;
+    border: 1px solid var(--border); border-radius: 10px;
+    font-size: 14px; font-family: inherit; color: var(--text);
+    background: var(--bg); outline: none;
+  }
+  .settings-sheet input:focus { border-color: var(--accent); }
+  .settings-sheet .hint {
+    font-size: 11px; color: var(--text-dim); margin-top: 4px; line-height: 1.5;
+  }
+  .settings-sheet .btn { width: 100%; margin-top: 20px; }
+  .settings-sheet .close-btn {
+    position: absolute; top: 16px; right: 20px;
+    width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+    border: none; background: var(--bg); border-radius: 14px;
+    font-size: 14px; cursor: pointer; color: var(--text-dim);
+  }
+
+  /* ── 保存中遮罩 ── */
+  .saving-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(250,248,245,0.85); z-index: 80;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    opacity: 0; pointer-events: none; transition: opacity 0.2s;
+  }
+  .saving-overlay.show { opacity: 1; pointer-events: auto; }
+  .saving-spinner {
+    width: 40px; height: 40px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  .saving-text { margin-top: 16px; font-size: 14px; color: var(--text-dim); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <h1>🌿 aye写作</h1>
+  <button class="btn-icon" id="btn-settings" title="设置">⚙️</button>
+</header>
+
+<div class="main">
+
+  <!-- 编辑器 -->
+  <div class="editor-wrap">
+    <input class="editor-title" id="editor-title" maxlength="40" placeholder="标题（可留空，AI 会帮你生成）">
+    <select class="editor-status" id="editor-status">
+      <option value="needs_optimization">需要电脑端优化（默认）</option>
+      <option value="final">已定稿，电脑端直接排版</option>
+    </select>
+    <input class="editor-photos" id="editor-photos" type="file" accept="image/*" multiple>
+    <p class="editor-hint">可附加 1–3 张候选封面照片；文章与照片会一起上传。</p>
+    <textarea id="editor" placeholder="开始写点什么…&#10;口语化地写，想说什么就写什么。"></textarea>
+  </div>
+
+  <div class="editor-actions">
+    <button class="btn btn-primary" id="btn-save" style="flex:1">💾 保存并上传</button>
+  </div>
+
+  <!-- 文章列表 -->
+  <div class="section-title">📄 文章列表</div>
+  <div class="article-list" id="article-list">
+    <div class="empty-state">还没有文章，开始写吧 ✨</div>
+  </div>
+
+</div>
+
+<!-- 设置浮层 -->
+<div class="overlay" id="overlay"></div>
+<div class="settings-sheet" id="settings-sheet">
+  <div class="sheet-handle"></div>
+  <button class="close-btn" id="btn-close-settings">✕</button>
+  <div class="sheet-content">
+    <label>🔑 DeepSeek API Key</label>
+    <input type="password" id="cfg-deepseek-key" placeholder="sk-...">
+    <div class="hint">从 platform.deepseek.com → API Keys 获取</div>
+
+    <label>🔑 GitHub Personal Access Token</label>
+    <input type="password" id="cfg-github-token" placeholder="ghp_...">
+    <div class="hint">从 github.com/settings/tokens 创建，勾选 repo 权限</div>
+
+    <label>📂 GitHub 仓库</label>
+    <input type="text" id="cfg-github-repo" placeholder="用户名/仓库名">
+    <div class="hint">如 xranZhao/aye_article</div>
+
+    <label>📁 子目录（可选）</label>
+    <input type="text" id="cfg-github-path" placeholder="留空默认根目录">
+
+    <button class="btn btn-primary" id="btn-save-config">保存配置</button>
+  </div>
+</div>
+
+<!-- 保存中加载 -->
+<div class="saving-overlay" id="saving-overlay">
+  <div class="saving-spinner"></div>
+  <div class="saving-text" id="saving-text">正在生成标题…</div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ╔══════════════════════════════════╗
+// ║  aye写作 PWA - 核心逻辑         ║
+// ╚══════════════════════════════════╝
+
+const DB_NAME = 'aye-writer';
+const DB_VERSION = 2;
+const STORE_NAME = 'articles';
+
+// ── 数据库 ──
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        const store = db.createObjectStore(STORE_NAME, { keyPath: 'id', autoIncrement: true });
+        store.createIndex('filename', 'filename', { unique: true });
+        store.createIndex('status', 'status');
+        store.createIndex('updatedAt', 'updatedAt');
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function saveArticle(filename, content, status = 'local', extras = {}) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const idx = store.index('filename');
+    const getReq = idx.get(filename);
+
+    getReq.onsuccess = () => {
+      const existing = getReq.result;
+      const record = {
+        ...(existing || {}),
+        filename,
+        content,
+        status,
+        ...extras,
+        updatedAt: new Date().toISOString(),
+        size: new Blob([content]).size
+      };
+      store.put(record);
+      tx.oncomplete = () => resolve(filename);
+      tx.onerror = () => reject(tx.error);
+    };
+  });
+}
+
+async function getArticles() {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const req = store.getAll();
+    req.onsuccess = () => {
+      resolve(req.result.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)));
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getArticle(filename) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const idx = store.index('filename');
+    const req = idx.get(filename);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function deleteArticle(filename) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    const idx = store.index('filename');
+    const getReq = idx.get(filename);
+    getReq.onsuccess = () => {
+      if (getReq.result) store.delete(getReq.result.id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    };
+  });
+}
+
+// ── 配置管理 ──
+function getConfig() {
+  try { return JSON.parse(localStorage.getItem('aye-config') || '{}'); } catch { return {}; }
+}
+
+function saveConfigObj(config) {
+  localStorage.setItem('aye-config', JSON.stringify(config));
+}
+
+// ── Toast ──
+let toastTimer;
+function showToast(msg, isError = false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = 'toast'; }, 2500);
+}
+
+// ── AI 生成标题 ──
+async function generateTitleFromAI(content) {
+  const config = getConfig();
+  if (!config.deepseekKey) return null;
+
+  try {
+    const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.deepseekKey}`
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          {
+            role: 'system',
+            content: `你是个人IP写作助手。根据用户文章内容，生成一个文件名格式的标题。
+
+严格规则：
+1. 格式必须为：YYMMDD_关键词（如 260805_离婚的思考 或 260805_上海见闻_原生家庭）
+2. 日期用今天日期的后两位表示年月日（如2026年8月5日→260805）
+3. 关键词1-2个，用下划线连接，每个关键词2-10个字
+4. 关键词抓文章核心矛盾或核心事件，不要泛泛标签
+5. 只返回文件名（不含扩展名），不要带任何前缀、解释、标点符号或引号`
+          },
+          {
+            role: 'user',
+            content: `今天的日期是：${todayString()}\n\n文章内容：\n${content.slice(0, 2000)}`
+          }
+        ],
+        max_tokens: 40,
+        temperature: 0.7
+      })
+    });
+
+    if (!resp.ok) return null;
+
+    const data = await resp.json();
+    const title = data.choices[0].message.content.trim()
+      .replace(/^["'`：:：\s]+/, '')
+      .replace(/["'`]+$/, '')
+      .replace(/\.md$/i, '');
+
+    // 验证格式：6位日期开头
+    if (/^\d{6}_/.test(title)) return title;
+    // 如果AI没返回正确格式，用日期回退
+    const d = new Date();
+    const dateStr = String(d.getFullYear()).slice(2) + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+    return dateStr + '_' + title.replace(/^\d{6}_?/, '');
+  } catch {
+    return null;
+  }
+}
+
+function todayString() {
+  const d = new Date();
+  return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日 (${String(d.getFullYear()).slice(2)}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')})`;
+}
+
+function fallbackTitle(content) {
+  const d = new Date();
+  const dateStr = String(d.getFullYear()).slice(2) + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+  const preview = content.slice(0, 30).replace(/[\n\r\s]+/g, ' ').trim();
+  return `${dateStr}_${preview}`;
+}
+
+function normalizeTitle(value) {
+  return value.replace(/\.md$/i, '').replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function readPhoto(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ name: file.name, type: file.type || 'image/jpeg', dataUrl: reader.result, size: file.size });
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── 保存 + AI标题 ──
+async function saveCurrentArticle() {
+  const content = document.getElementById('editor').value.trim();
+  if (!content) { showToast('写点东西再保存吧', true); return; }
+
+  const titleInput = document.getElementById('editor-title');
+  const statusInput = document.getElementById('editor-status');
+  const photoInput = document.getElementById('editor-photos');
+  if (photoInput.files.length > 3) { showToast('最多附加 3 张候选照片', true); return; }
+
+  const config = getConfig();
+  const hasAI = config.deepseekKey;
+
+  // 显示保存中
+  const overlay = document.getElementById('saving-overlay');
+  const savingText = document.getElementById('saving-text');
+  overlay.classList.add('show');
+  savingText.textContent = '正在生成标题…';
+
+  const btn = document.getElementById('btn-save');
+  btn.disabled = true;
+
+  let title = normalizeTitle(titleInput.value);
+  if (!title && hasAI) {
+    title = await generateTitleFromAI(content);
+    if (!title) {
+      savingText.textContent = 'AI标题失败，使用默认标题…';
+      await new Promise(r => setTimeout(r, 600));
+    }
+  }
+
+  if (!title) title = fallbackTitle(content);
+  title = normalizeTitle(title);
+  const confirmedTitle = prompt('确认或修改文章标题', title);
+  if (!confirmedTitle?.trim()) {
+    overlay.classList.remove('show');
+    btn.disabled = false;
+    return;
+  }
+  title = normalizeTitle(confirmedTitle);
+  titleInput.value = title;
+  const datePrefix = /^\d{6}_/.test(title) ? '' : `${String(new Date().getFullYear()).slice(2)}${String(new Date().getMonth()+1).padStart(2,'0')}${String(new Date().getDate()).padStart(2,'0')}_`;
+  const filename = datePrefix + title + '.md';
+
+  try {
+    const photos = await Promise.all([...photoInput.files].map(readPhoto));
+    await saveArticle(filename, content, 'local', { workflowStatus: statusInput.value, photos });
+    document.getElementById('editor').value = '';
+    titleInput.value = '';
+    photoInput.value = '';
+    localStorage.removeItem('aye-draft');
+    await uploadToGitHub(filename, true);
+    await renderArticleList();
+    showToast(`已保存: ${filename}`);
+  } catch (e) {
+    showToast(`保存失败: ${e.message}`, true);
+  } finally {
+    overlay.classList.remove('show');
+    btn.disabled = false;
+  }
+}
+
+// ── 上传到 GitHub ──
+async function putFileToGitHub(config, remotePath, base64Content, message) {
+  const safePath = remotePath.split('/').map(encodeURIComponent).join('/');
+  const apiPath = `https://api.github.com/repos/${config.githubRepo}/contents/${safePath}`;
+  let sha = null;
+  const checkResp = await fetch(apiPath, { headers: { 'Authorization': `token ${config.githubToken}`, 'Accept': 'application/vnd.github.v3+json' } });
+  if (checkResp.ok) sha = (await checkResp.json()).sha;
+  const resp = await fetch(apiPath, {
+    method: 'PUT',
+    headers: { 'Authorization': `token ${config.githubToken}`, 'Content-Type': 'application/json', 'Accept': 'application/vnd.github.v3+json' },
+    body: JSON.stringify({ message, content: base64Content, ...(sha ? { sha } : {}) })
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.message || `上传失败 (${resp.status})`);
+  }
+}
+
+async function uploadToGitHub(filename, silent = false) {
+  const config = getConfig();
+  if (!config.githubToken || !config.githubRepo) {
+    showToast('请先在设置填 GitHub Token 和仓库', true);
+    openSettings();
+    return;
+  }
+
+  const article = await getArticle(filename);
+  if (!article) return;
+
+  await saveArticle(filename, article.content, 'uploading');
+  await renderArticleList();
+
+  const subPath = config.githubPath ? `${config.githubPath.replace(/\/$/, '')}/` : '';
+  const rawPath = `${subPath}0-原始文稿/${filename}`;
+  const contentBase64 = btoa(unescape(encodeURIComponent(article.content)));
+
+  try {
+    await putFileToGitHub(config, rawPath, contentBase64, `📝 原稿：${filename}`);
+    const id = filename.replace(/\.md$/i, '');
+    const photoEntries = [];
+    for (const photo of article.photos || []) {
+      const safeName = photo.name.replace(/[\\/:*?"<>|]/g, '_');
+      const photoPath = `${subPath}4-素材与封面/${id}/原始照片/${safeName}`;
+      const base64 = photo.dataUrl.split(',')[1];
+      await putFileToGitHub(config, photoPath, base64, `📷 封面素材：${id}`);
+      photoEntries.push({ name: safeName, path: photoPath, size: photo.size });
+    }
+    const meta = { id, title: id.replace(/^\d{6}_/, ''), status: article.workflowStatus || 'needs_optimization', photos: photoEntries, uploadedAt: new Date().toISOString() };
+    await putFileToGitHub(config, `${subPath}0-原始文稿/${id}.meta.json`, btoa(unescape(encodeURIComponent(JSON.stringify(meta, null, 2)))), `📋 工作流元数据：${id}`);
+
+    await saveArticle(filename, article.content, 'cloud');
+    await renderArticleList();
+    if (!silent) showToast(`已上传: ${filename}`);
+  } catch (e) {
+    await saveArticle(filename, article.content, 'local');
+    await renderArticleList();
+    if (!silent) showToast(`上传失败: ${e.message}`, true);
+  }
+}
+
+// ── 渲染文章列表 ──
+async function renderArticleList() {
+  const listEl = document.getElementById('article-list');
+  const articles = await getArticles();
+
+  if (articles.length === 0) {
+    listEl.innerHTML = '<div class="empty-state">还没有文章，开始写吧 ✨</div>';
+    return;
+  }
+
+  listEl.innerHTML = articles.map(a => {
+    const date = a.updatedAt.slice(0, 16).replace('T', ' ');
+    const sizeKB = (a.size / 1024).toFixed(1);
+    const statusMap = {
+      'cloud': '<span class="status status-cloud">☁️ 已同步</span>',
+      'local': '<span class="status status-local">📱 本地</span>',
+      'uploading': '<span class="status status-uploading">⬆ 上传中</span>'
+    };
+    const statusBadge = statusMap[a.status] || '';
+    const isCloud = a.status === 'cloud';
+    const workflowBadge = a.workflowStatus === 'final' ? '<span class="status status-cloud">✅ 直接排版</span>' : '<span class="status status-local">✏️ 待优化</span>';
+
+    return `
+      <div class="article-item">
+        <div class="info">
+          <div class="filename">${escapeHtml(a.filename)}</div>
+          <div class="meta">${date} · ${sizeKB}KB</div>
+        </div>
+        ${statusBadge}
+        ${workflowBadge}
+        <button class="btn-icon" onclick="uploadArticle('${escapeAttr(a.filename)}')" title="上传" ${isCloud ? 'disabled style="opacity:0.3"' : ''}>☁️</button>
+        <button class="btn-icon" onclick="deleteArticleConfirm('${escapeAttr(a.filename)}')" title="删除">🗑</button>
+      </div>
+    `;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escapeAttr(s) {
+  return s.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+}
+
+// ── 设置浮层 ──
+function openSettings() {
+  document.getElementById('settings-sheet').classList.add('show');
+  document.getElementById('overlay').classList.add('show');
+}
+
+function closeSettings() {
+  document.getElementById('settings-sheet').classList.remove('show');
+  document.getElementById('overlay').classList.remove('show');
+}
+
+// ── 全局操作 ──
+window.uploadArticle = async function(filename) {
+  await uploadToGitHub(filename);
+};
+
+window.deleteArticleConfirm = async function(filename) {
+  if (!confirm(`确定删除 "${filename}"？`)) return;
+  await deleteArticle(filename);
+  await renderArticleList();
+  showToast('已删除');
+};
+
+// ── 初始化 ──
+async function init() {
+  // 加载配置
+  const config = getConfig();
+  document.getElementById('cfg-deepseek-key').value = config.deepseekKey || '';
+  document.getElementById('cfg-github-token').value = config.githubToken || '';
+  document.getElementById('cfg-github-repo').value = config.githubRepo || '';
+  document.getElementById('cfg-github-path').value = config.githubPath || '';
+
+  await renderArticleList();
+
+  // 自动保存草稿
+  let autoSaveTimer;
+  document.getElementById('editor').addEventListener('input', () => {
+    clearTimeout(autoSaveTimer);
+    autoSaveTimer = setTimeout(() => {
+      const content = document.getElementById('editor').value;
+      if (content.trim()) {
+        localStorage.setItem('aye-draft', content);
+      }
+    }, 2000);
+  });
+
+  // 恢复草稿
+  const draft = localStorage.getItem('aye-draft');
+  if (draft) {
+    document.getElementById('editor').value = draft;
+  }
+}
+
+// ── 事件绑定 ──
+document.getElementById('btn-save').addEventListener('click', saveCurrentArticle);
+
+document.getElementById('btn-settings').addEventListener('click', openSettings);
+document.getElementById('btn-close-settings').addEventListener('click', closeSettings);
+document.getElementById('overlay').addEventListener('click', closeSettings);
+
+document.getElementById('btn-save-config').addEventListener('click', () => {
+  const config = {
+    deepseekKey: document.getElementById('cfg-deepseek-key').value.trim(),
+    githubToken: document.getElementById('cfg-github-token').value.trim(),
+    githubRepo: document.getElementById('cfg-github-repo').value.trim(),
+    githubPath: document.getElementById('cfg-github-path').value.trim()
+  };
+  saveConfigObj(config);
+  closeSettings();
+  showToast('配置已保存 ✅');
+});
+
+// Service Worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "aye-workflow",
+  "version": "1.0.0",
+  "description": "阿野IP内容工作流 - 手机写稿+电脑AI处理",
+  "type": "module",
+  "scripts": {
+    "workflow": "node aye.js sync && node aye.js list",
+    "migrate": "node aye.js migrate",
+    "articles": "node aye.js list --json"
+  },
+  "dependencies": {
+    "prompts": "^2.4.2"
+  }
+}
