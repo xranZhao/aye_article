@@ -6,7 +6,7 @@ param(
     [string]$Command
 )
 
-$WORKFLOW_DIR = "D:\CLAUDE\aye-workflow"
+$WORKFLOW_DIR = "D:\CLAUDE\aye-article"
 
 function Show-Help {
     Write-Host @"

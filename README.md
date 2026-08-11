@@ -18,14 +18,14 @@ node aye.js migrate
 2. 推送到 GitHub：
 
 ```bash
-cd D:\CLAUDE\aye-workflow
+cd D:\CLAUDE\aye-article
 git init
 git add -A
 git commit -m "初始化阿野写作 PWA + 工作流"
 
 # 创建 GitHub 远程仓库（手动在 github.com 创建，或在命令行用 gh CLI）
 # 然后推送：
-git remote add origin https://github.com/你的用户名/aye-workflow.git
+git remote add origin https://github.com/xranZhao/aye_article.git
 git push -u origin main
 ```
 
@@ -34,7 +34,7 @@ git push -u origin main
    - Source: "Deploy from a branch"
    - Branch: `main`，文件夹: `/ (root)`
    - 点击 Save
-   - 等几分钟后，访问 `https://你的用户名.github.io/aye-workflow/pwa/`
+   - 等几分钟后，访问 `https://xranZhao.github.io/aye_article/pwa/`
 
 ## 手机端使用
 

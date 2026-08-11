@@ -1,5 +1,5 @@
 @echo off
-set WORKFLOW_DIR=D:\CLAUDE\aye-workflow
+set WORKFLOW_DIR=D:\CLAUDE\aye-article
 
 if "%1"=="workflow" (
     cd /d %WORKFLOW_DIR%
