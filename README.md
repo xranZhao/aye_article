@@ -34,7 +34,7 @@ git push -u origin main
    - Source: "Deploy from a branch"
    - Branch: `main`，文件夹: `/ (root)`
    - 点击 Save
-   - 等几分钟后，访问 `https://xranZhao.github.io/aye_article/pwa/`
+   - 等几分钟后，访问 `https://xranzhao.github.io/aye_article/`
 
 ## 手机端使用
 

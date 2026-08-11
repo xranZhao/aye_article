@@ -1,7 +1,7 @@
 // 阿野写作 Service Worker
 // 提供离线缓存和后台上传功能
 
-const CACHE_NAME = 'aye-writer-v2';
+const CACHE_NAME = 'aye-writer-v3';
 const urlsToCache = [
   './',
   './index.html',
@@ -35,6 +35,14 @@ self.addEventListener('fetch', (event) => {
   // 不缓存 API 请求
   if (event.request.url.includes('api.deepseek.com') || event.request.url.includes('api.github.com')) {
     return; // 直接走网络
+  }
+
+  // HTML 始终优先拉取线上新版；断网时才退回已缓存的页面。
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match('./index.html'))
+    );
+    return;
   }
 
   event.respondWith(
