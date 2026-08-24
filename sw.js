@@ -1,7 +1,7 @@
 // 阿野写作 Service Worker
 // 提供离线缓存和后台上传功能
 
-const CACHE_NAME = 'aye-writer-v3';
+const CACHE_NAME = 'aye-writer-v4';
 const urlsToCache = [
   './',
   './index.html',

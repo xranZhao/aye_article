@@ -9,7 +9,7 @@ import {
   copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync,
   renameSync, rmSync, statSync, writeFileSync
 } from 'fs';
-import { basename, dirname, extname, join, parse } from 'path';
+import { basename, dirname, extname, join, parse, relative } from 'path';
 import { fileURLToPath } from 'url';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -22,6 +22,12 @@ const STAGES = {
   assets: join(ARTICLES, '4-素材与封面'),
 };
 const WORKFLOW_FILE = join(ARTICLES, 'workflow.json');
+const XIAOSHU_ROOT = join(ARTICLES, '5-小树觉察库');
+const XIAOSHU_TYPES = {
+  awareness: '觉察日记',
+  reverse: '反向选择',
+  happy: '快乐治愈',
+};
 const STAGE_LABELS = {
   raw: '待优化', pending: '优化待确认', published: '已确认发布',
   wechat: '公众号排版完成', cover: '封面完成', final: '已定稿，直接排版'
@@ -172,8 +178,135 @@ function confirmPublish(id) {
   return { id, published: target };
 }
 
+function walkMarkdown(directory) {
+  if (!existsSync(directory)) return [];
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...walkMarkdown(path));
+    else if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) files.push(path);
+  }
+  return files;
+}
+
+function parseFrontmatter(text) {
+  const normalized = text.replace(/\r\n/g, '\n');
+  if (!normalized.startsWith('---\n')) return { meta: {}, body: normalized };
+  const end = normalized.indexOf('\n---\n', 4);
+  if (end < 0) return { meta: {}, body: normalized };
+  const meta = {};
+  for (const line of normalized.slice(4, end).split('\n')) {
+    const match = line.match(/^([A-Za-z][A-Za-z0-9]*):\s*(.*)$/u);
+    if (!match) continue;
+    const [, key, raw] = match;
+    try { meta[key] = JSON.parse(raw); } catch { meta[key] = raw; }
+  }
+  return { meta, body: normalized.slice(end + 5).trim() };
+}
+
+function normalizeXiaoshuType(value) {
+  if (!value) return '';
+  const aliases = {
+    awareness: 'awareness', '觉察': 'awareness', '觉察日记': 'awareness',
+    reverse: 'reverse', '反向': 'reverse', '反向选择': 'reverse',
+    happy: 'happy', '快乐': 'happy', '快乐治愈': 'happy',
+  };
+  return aliases[value] || value;
+}
+
+function optionValue(args, name) {
+  const index = args.indexOf(name);
+  return index >= 0 ? args[index + 1] : '';
+}
+
+function sinceTimestamp(value) {
+  if (!value) return 0;
+  const days = value.match(/^(\d+)d$/iu);
+  if (days) return Date.now() - Number(days[1]) * 86400000;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) throw new Error(`无法识别时间范围：${value}，请使用 30d 或 YYYY-MM-DD`);
+  return parsed;
+}
+
+function loadXiaoshuEntries(args = []) {
+  const requestedType = normalizeXiaoshuType(optionValue(args, '--type'));
+  const since = sinceTimestamp(optionValue(args, '--since'));
+  const entries = [];
+  for (const path of walkMarkdown(XIAOSHU_ROOT)) {
+    const text = readFileSync(path, 'utf8');
+    const { meta, body } = parseFrontmatter(text);
+    const inferredFolder = relative(XIAOSHU_ROOT, dirname(path)).split(/[\\/]/u)[0];
+    const inferredType = Object.entries(XIAOSHU_TYPES).find(([, label]) => label === inferredFolder)?.[0] || '';
+    const type = normalizeXiaoshuType(meta.type) || inferredType;
+    const createdAt = meta.createdAt || statSync(path).mtime.toISOString();
+    if (requestedType && type !== requestedType) continue;
+    if (since && Date.parse(createdAt) < since) continue;
+    entries.push({
+      id: String(meta.id || parse(path).name),
+      type,
+      typeLabel: meta.typeLabel || XIAOSHU_TYPES[type] || inferredFolder,
+      title: meta.title || body.match(/^#\s+(.+)$/mu)?.[1] || '未命名',
+      createdAt,
+      words: body.replace(/\s+/gu, '').length,
+      path,
+      relativePath: relative(ARTICLES, path).replace(/\\/gu, '/'),
+      body,
+      raw: text,
+    });
+  }
+  return entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function xiaoshuList(args = []) {
+  const entries = loadXiaoshuEntries(args);
+  const rows = entries.map(({ id, type, typeLabel, title, createdAt, words, relativePath }) => ({
+    id, type, typeLabel, title, createdAt, words, path: relativePath,
+  }));
+  if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
+  else if (rows.length === 0) console.log('暂无匹配的小树觉察记录');
+  else console.table(rows);
+  return rows;
+}
+
+function xiaoshuShow(id) {
+  if (!id) throw new Error('请提供记录 ID');
+  const entry = loadXiaoshuEntries().find(item => item.id === String(id));
+  if (!entry) throw new Error(`找不到小树记录：${id}`);
+  console.log(entry.raw);
+}
+
+function xiaoshuSearch(keyword, args = []) {
+  if (!keyword) throw new Error('请提供搜索关键词');
+  const needle = keyword.toLocaleLowerCase('zh-CN');
+  const matches = loadXiaoshuEntries(args).filter(entry =>
+    `${entry.title}\n${entry.body}`.toLocaleLowerCase('zh-CN').includes(needle)
+  );
+  const rows = matches.map(({ id, typeLabel, title, createdAt, relativePath }) => ({
+    id, type: typeLabel, title, createdAt, path: relativePath,
+  }));
+  if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
+  else if (rows.length === 0) console.log(`没有找到包含“${keyword}”的小树记录`);
+  else console.table(rows);
+  return rows;
+}
+
+function xiaoshuCommand(args) {
+  const [subcommand = 'list', ...rest] = args;
+  if (subcommand === 'sync') {
+    const pull = gitPull();
+    if (!pull.ok) console.error(`同步失败：${pull.error}`);
+    else console.log('小树资料库同步完成');
+    xiaoshuList(rest);
+    return;
+  }
+  if (subcommand === 'list') { xiaoshuList(rest); return; }
+  if (subcommand === 'show') { xiaoshuShow(rest[0]); return; }
+  if (subcommand === 'search') { xiaoshuSearch(rest[0], rest.slice(1)); return; }
+  throw new Error(`未知的小树命令：${subcommand}`);
+}
+
 function help() {
-  console.log(`\n🌿 阿野图文工作流\n\n  node aye.js sync              拉取文章库并更新状态\n  node aye.js list [--json]     列出待处理文章\n  node aye.js migrate           迁移旧文件到 0-4 阶段目录\n  node aye.js confirm <文章ID>  将待确认稿复制为发布文稿\n`);
+  console.log(`\n🌿 阿野图文工作流\n\n  node aye.js sync                         拉取文章库并更新状态\n  node aye.js list [--json]                列出待处理文章\n  node aye.js migrate                      迁移旧文件到 0-4 阶段目录\n  node aye.js confirm <文章ID>             将待确认稿复制为发布文稿\n\n  node aye.js xiaoshu sync                 拉取并列出小树觉察记录\n  node aye.js xiaoshu list [选项]          列出本地小树觉察记录\n  node aye.js xiaoshu show <记录ID>        查看一条记录全文\n  node aye.js xiaoshu search <关键词>      搜索觉察材料\n\n  小树筛选选项：--type awareness|reverse|happy  --since 30d|YYYY-MM-DD  --json\n`);
 }
 
 function main() {
@@ -183,6 +316,7 @@ function main() {
   if (command === 'migrate') { console.log(JSON.stringify(migrateLegacy(), null, 2)); return; }
   if (command === 'list') { const items = listArticles(); if (args.includes('--json')) console.log(JSON.stringify(items, null, 2)); else console.table(items); return; }
   if (command === 'confirm') { console.log(JSON.stringify(confirmPublish(args[0]), null, 2)); return; }
+  if (command === 'xiaoshu') { xiaoshuCommand(args); return; }
   help();
 }
 

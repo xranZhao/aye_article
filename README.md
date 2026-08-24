@@ -12,6 +12,19 @@
 node aye.js migrate
 ```
 
+## 调用小树觉察记录
+
+小树觉察室可以将单条记录或全部未同步记录上传到私人内容仓库的 `5-小树觉察库/`。电脑端运行：
+
+```powershell
+node aye.js xiaoshu sync
+node aye.js xiaoshu list --type reverse --since 30d
+node aye.js xiaoshu search 边界
+node aye.js xiaoshu show <记录ID>
+```
+
+小树记录不会进入文章待处理队列，也不会写入 `workflow.json`。日记只能上传到 Private 仓库，不能放进公开的 `aye_article` 代码仓库。
+
 ## 部署到 GitHub Pages
 
 1. 在本仓库根目录创建 `pwa/` 目录（已完成）

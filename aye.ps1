@@ -3,10 +3,12 @@
 
 param(
     [Parameter(Position=0)]
-    [string]$Command
+    [string]$Command,
+    [Parameter(Position=1, ValueFromRemainingArguments=$true)]
+    [string[]]$CommandArgs
 )
 
-$WORKFLOW_DIR = "D:\CLAUDE\aye-article"
+$WORKFLOW_DIR = $PSScriptRoot
 
 function Show-Help {
     Write-Host @"
@@ -17,6 +19,7 @@ function Show-Help {
   aye workflow  拉取并列出待处理文章
   aye list      列出所有文章及处理状态
   aye migrate   迁移历史文章到阶段目录
+  aye xiaoshu   同步并列出小树觉察记录
 
 "@
 }
@@ -34,6 +37,14 @@ switch ($Command) {
     "migrate" {
         Set-Location $WORKFLOW_DIR
         node aye.js migrate
+    }
+    "xiaoshu" {
+        Set-Location $WORKFLOW_DIR
+        if ($CommandArgs.Count -gt 0) {
+            node aye.js xiaoshu @CommandArgs
+        } else {
+            node aye.js xiaoshu sync
+        }
     }
     default {
         Show-Help

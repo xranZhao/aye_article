@@ -6,7 +6,8 @@
   "scripts": {
     "workflow": "node aye.js sync && node aye.js list",
     "migrate": "node aye.js migrate",
-    "articles": "node aye.js list --json"
+    "articles": "node aye.js list --json",
+    "xiaoshu": "node aye.js xiaoshu sync"
   },
   "dependencies": {
     "prompts": "^2.4.2"
