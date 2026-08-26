@@ -4,7 +4,8 @@
   "description": "阿野IP内容工作流 - 手机写稿+电脑AI处理",
   "type": "module",
   "scripts": {
-    "workflow": "node aye.js sync && node aye.js list",
+    "workflow": "node aye.js sync && node aye.js candidates",
+    "start": "node aye.js sync && node aye.js candidates",
     "migrate": "node aye.js migrate",
     "articles": "node aye.js list --json",
     "xiaoshu": "node aye.js xiaoshu sync"

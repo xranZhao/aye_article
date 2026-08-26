@@ -1,5 +1,5 @@
 # aye.ps1 - 阿野IP工作流启动器
-# 用法: aye workflow
+# 用法: aye start
 
 param(
     [Parameter(Position=0)]
@@ -16,7 +16,7 @@ function Show-Help {
 🌿 阿野IP内容工作流
 
 用法:
-  aye workflow  拉取并列出待处理文章
+  aye start     拉取并列出全部可改写内容
   aye list      列出所有文章及处理状态
   aye migrate   迁移历史文章到阶段目录
   aye xiaoshu   同步并列出小树觉察记录
@@ -25,10 +25,15 @@ function Show-Help {
 }
 
 switch ($Command) {
+    "start" {
+        Set-Location $WORKFLOW_DIR
+        node aye.js sync
+        node aye.js candidates
+    }
     "workflow" {
         Set-Location $WORKFLOW_DIR
         node aye.js sync
-        node aye.js list
+        node aye.js candidates
     }
     "list" {
         Set-Location $WORKFLOW_DIR

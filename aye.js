@@ -163,6 +163,49 @@ function listArticles() {
     .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
 }
 
+// 将手机原稿和小树记录放进同一份可选清单，原文始终保留在各自的归档位置。
+function listCandidates() {
+  const mobile = listArticles().map(article => ({
+    source: '手机原稿',
+    sourceKey: 'article',
+    id: article.id,
+    title: article.title,
+    createdAt: article.uploadedAt,
+    words: article.words,
+    status: article.status,
+  }));
+  const xiaoshu = loadXiaoshuEntries().map(entry => ({
+    source: entry.typeLabel,
+    sourceKey: 'xiaoshu',
+    id: entry.id,
+    title: entry.title,
+    createdAt: entry.createdAt,
+    words: entry.words,
+    status: '可改写',
+  }));
+  return [...mobile, ...xiaoshu]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function prepareXiaoshu(id) {
+  if (!id) throw new Error('请提供小树记录 ID');
+  const entry = loadXiaoshuEntries().find(item => item.id === String(id));
+  if (!entry) throw new Error(`找不到小树记录：${id}`);
+  ensureLayout();
+  const articleId = `小树_${entry.id}`;
+  const target = stageFile('pending', articleId);
+  copyFileSync(entry.path, target);
+  const workflow = loadWorkflow();
+  const article = workflow.articles[articleId] ||= { id: articleId, createdAt: now(), references: [], history: [] };
+  article.title = entry.title;
+  article.pending = fileInfo(target);
+  article.status = 'pending';
+  article.source = { type: 'xiaoshu', id: entry.id, path: entry.relativePath, typeLabel: entry.typeLabel };
+  article.history.push({ at: now(), action: 'prepared_from_xiaoshu', sourceId: entry.id });
+  saveWorkflow(workflow);
+  return { id: articleId, pending: target, source: entry.relativePath };
+}
+
 function confirmPublish(id) {
   ensureLayout();
   const source = stageFile('pending', id);
@@ -306,13 +349,15 @@ function xiaoshuCommand(args) {
 }
 
 function help() {
-  console.log(`\n🌿 阿野图文工作流\n\n  node aye.js sync                         拉取文章库并更新状态\n  node aye.js list [--json]                列出待处理文章\n  node aye.js migrate                      迁移旧文件到 0-4 阶段目录\n  node aye.js confirm <文章ID>             将待确认稿复制为发布文稿\n\n  node aye.js xiaoshu sync                 拉取并列出小树觉察记录\n  node aye.js xiaoshu list [选项]          列出本地小树觉察记录\n  node aye.js xiaoshu show <记录ID>        查看一条记录全文\n  node aye.js xiaoshu search <关键词>      搜索觉察材料\n\n  小树筛选选项：--type awareness|reverse|happy  --since 30d|YYYY-MM-DD  --json\n`);
+  console.log(`\n🌿 阿野图文工作流\n\n  node aye.js sync                         拉取文章库并更新状态\n  node aye.js candidates [--json]          列出全部可改写内容\n  node aye.js prepare xiaoshu <记录ID>     将小树记录复制为待确认稿\n  node aye.js list [--json]                列出手机文章队列\n  node aye.js migrate                      迁移旧文件到 0-4 阶段目录\n  node aye.js confirm <文章ID>             将待确认稿复制为发布文稿\n\n  node aye.js xiaoshu sync                 拉取并列出小树觉察记录\n  node aye.js xiaoshu list [选项]          列出本地小树觉察记录\n  node aye.js xiaoshu show <记录ID>        查看一条记录全文\n  node aye.js xiaoshu search <关键词>      搜索觉察材料\n\n  小树筛选选项：--type awareness|reverse|happy  --since 30d|YYYY-MM-DD  --json\n`);
 }
 
 function main() {
   const [command = 'help', ...args] = process.argv.slice(2);
   if (!existsSync(ARTICLES)) throw new Error(`找不到文章库：${ARTICLES}`);
   if (command === 'sync') { const pull = gitPull(); const workflow = upsertFromFiles(); console.log(JSON.stringify({ pull, articles: Object.keys(workflow.articles).length }, null, 2)); return; }
+  if (command === 'candidates') { const items = listCandidates(); if (args.includes('--json')) console.log(JSON.stringify(items, null, 2)); else console.table(items); return; }
+  if (command === 'prepare' && args[0] === 'xiaoshu') { console.log(JSON.stringify(prepareXiaoshu(args[1]), null, 2)); return; }
   if (command === 'migrate') { console.log(JSON.stringify(migrateLegacy(), null, 2)); return; }
   if (command === 'list') { const items = listArticles(); if (args.includes('--json')) console.log(JSON.stringify(items, null, 2)); else console.table(items); return; }
   if (command === 'confirm') { console.log(JSON.stringify(confirmPublish(args[0]), null, 2)); return; }
