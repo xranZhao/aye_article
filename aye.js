@@ -261,6 +261,43 @@ function normalizeReviewDecision(value) {
   return result;
 }
 
+const TAG_RULES = [
+  ['职场', /工作|领导|项目|公司|上班|交付|IT|裁员|同事|群里/u],
+  ['亲密关系', /老公|对象|结婚|婚礼|伴侣|恋爱/u],
+  ['家庭关系', /妈妈|爸爸|父母|家里人/u],
+  ['焦虑', /焦虑|紧迫|着急|压力/u],
+  ['恐惧', /恐惧|害怕|不敢|被抛弃/u],
+  ['羞耻', /羞耻|丢人|不配|被看见/u],
+  ['愤怒', /愤怒|生气|气愤|凭什么/u],
+  ['边界', /边界|拒绝|不妥|不得体/u],
+  ['背叛怀疑', /背叛|怀疑|出轨|瞎搞/u],
+  ['表达恐惧', /发消息|表达.*需求|提需求|录屏|声音/u],
+  ['躯体反应', /偏头痛|头痛|身体.*痛|太阳穴|失眠/u],
+  ['睡眠', /睡觉|失眠|午睡|入睡|关灯/u],
+  ['梦境', /做梦|梦里|考试|找座位/u],
+  ['自我价值', /认可|自豪|成就感|不够好|对得起/u],
+  ['觉察应用素材', /觉察应用|觉察日记|觉察即满足/u],
+  ['日常工作记录', /加班|bug|交付|新项目/u],
+];
+
+function automaticTags(candidate, note = '') {
+  const body = candidate.body || (candidate.path && existsSync(candidate.path) ? readFileSync(candidate.path, 'utf8') : '');
+  const source = `${candidate.title || ''}\n${body}`;
+  const noteTags = TAG_RULES.filter(([, pattern]) => pattern.test(note)).map(([tag]) => tag);
+  const contentTags = TAG_RULES.filter(([, pattern]) => pattern.test(source)).map(([tag]) => tag);
+  const tags = [...noteTags, ...contentTags];
+  if (candidate.sourceKey === 'xiaoshu' && candidate.source === '反向选择') tags.push('反向选择');
+  if (candidate.sourceKey === 'xiaoshu' && candidate.source === '快乐治愈') tags.push('正向体验');
+  return [...new Set(tags)].slice(0, 5);
+}
+
+function inferMaterialUse(decision, note = '') {
+  if (decision === 'published') return '已发布';
+  if (/素材|合并|关联|一起写|不单独/u.test(note)) return '关联素材';
+  if (decision === 'write') return '独立文章';
+  return '暂不使用';
+}
+
 function excerpt(text, limit = 72) {
   return text.replace(/^---[\s\S]*?---\s*/u, '').replace(/[#>*_`\r\n]+/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, limit);
 }
@@ -283,6 +320,8 @@ function reviewRows(includePublished = false) {
       decision,
       reviewNote: review?.note || '',
       reviewedAt: review?.reviewedAt || '',
+      materialUse: review?.materialUse || inferMaterialUse(review?.decision || 'unreviewed', review?.note || ''),
+      tags: review?.tags || automaticTags(candidate, review?.note || ''),
       processStatus: article ? (STAGE_LABELS[article.status] || article.status) : '原始素材',
       summary: excerpt(text),
     };
@@ -308,13 +347,14 @@ function writeReviewReport(includePublished = false) {
   for (const [label, items] of groups) {
     lines.push(`## ${label}（${items.length}）`, '');
     if (items.length === 0) { lines.push('暂无。', ''); continue; }
-    lines.push('| # | 来源 | 标题 | 字数 | 处理状态 | 摘要 | 结论 |', '|---:|---|---|---:|---|---|---|');
+    lines.push('| # | 来源 | 标题 | 字数 | 处理状态 | 摘要 | 用途 / 标签 | 结论 |', '|---:|---|---|---:|---|---|---|---|');
     for (const row of items) {
       const title = String(row.title || '未命名').replace(/\|/gu, '｜');
       const source = row.source.replace(/\|/gu, '｜');
       const link = row.path ? `[${title}](file:///${row.path.replace(/\\/gu, '/')})` : title;
       const note = row.reviewNote ? `（${row.reviewNote.replace(/\|/gu, '｜')}）` : '';
-      lines.push(`| ${row.number} | ${source} | ${link}<br><sub>${row.id}</sub> | ${row.words} | ${row.processStatus} | ${row.summary.replace(/\|/gu, '｜')} | ${row.decision}${note} |`);
+      const tags = row.tags.length ? row.tags.join('、') : '待生成';
+      lines.push(`| ${row.number} | ${source} | ${link}<br><sub>${row.id}</sub> | ${row.words} | ${row.processStatus} | ${row.summary.replace(/\|/gu, '｜')} | ${row.materialUse}<br><sub>${tags}</sub> | ${row.decision}${note} |`);
     }
     lines.push('');
   }
@@ -328,7 +368,13 @@ function setReviewDecision(sourceKey, id, decisionInput, note = '') {
   if (!candidates.some(item => item.sourceKey === sourceKey && item.id === String(id))) throw new Error(`找不到稿件：${sourceKey}:${id}`);
   const workflow = loadWorkflow();
   const decision = normalizeReviewDecision(decisionInput);
-  workflow.reviews[reviewKey(sourceKey, id)] = { decision, reviewedAt: now(), note };
+  workflow.reviews[reviewKey(sourceKey, id)] = {
+    decision,
+    reviewedAt: now(),
+    note,
+    materialUse: inferMaterialUse(decision, note),
+    tags: automaticTags(candidate, note),
+  };
   saveWorkflow(workflow);
   writeReviewReport(false);
   return { source: sourceKey, id: String(id), decision: REVIEW_DECISIONS[decision], note };
@@ -336,8 +382,36 @@ function setReviewDecision(sourceKey, id, decisionInput, note = '') {
 
 function listEditable() {
   return reviewRows(false)
-    .filter(row => row.decision === '可写' || row.decision === '进行中')
-    .map(({ source, sourceKey, id, title, words, processStatus, decision }) => ({ source, sourceKey, id, title, words, processStatus, decision }));
+    .filter(row => row.decision === '进行中' || (row.decision === '可写' && row.materialUse === '独立文章'))
+    .map(({ source, sourceKey, id, title, words, processStatus, decision, tags, materialUse }) => ({ source, sourceKey, id, title, words, processStatus, decision, materialUse, tags }));
+}
+
+function backfillReviewTags() {
+  const workflow = loadWorkflow();
+  const candidates = listCandidates();
+  let updated = 0;
+  for (const candidate of candidates) {
+    const key = reviewKey(candidate.sourceKey, candidate.id);
+    const review = workflow.reviews[key];
+    if (!review) continue;
+    const tags = automaticTags(candidate, review.note || '');
+    const materialUse = inferMaterialUse(review.decision, review.note || '');
+    if (JSON.stringify(tags) !== JSON.stringify(review.tags || []) || materialUse !== review.materialUse) {
+      workflow.reviews[key] = { ...review, tags, materialUse };
+      updated += 1;
+    }
+  }
+  saveWorkflow(workflow);
+  writeReviewReport(false);
+  return { updated };
+}
+
+function listMaterials(tags = []) {
+  const needles = tags.filter(tag => tag !== '--json').map(tag => tag.trim()).filter(Boolean);
+  return reviewRows(false)
+    .filter(row => row.materialUse === '关联素材')
+    .filter(row => needles.length === 0 || needles.every(tag => row.tags.includes(tag)))
+    .map(({ source, sourceKey, id, title, words, tags: rowTags, reviewNote }) => ({ source, sourceKey, id, title, words, tags: rowTags, note: reviewNote }));
 }
 
 function downloadArticles() {
@@ -521,11 +595,15 @@ function reviewCommand(args) {
     console.log(JSON.stringify(setReviewDecision(sourceKey, id, decision, noteParts.join(' ')), null, 2));
     return;
   }
-  throw new Error('审阅命令：review [list|all] 或 review set <article|xiaoshu> <ID> <待浏览|可写|略过|已发布> [备注]');
+  if (subcommand === 'tag') {
+    console.log(JSON.stringify(backfillReviewTags(), null, 2));
+    return;
+  }
+  throw new Error('审阅命令：review [list|all|tag] 或 review set <article|xiaoshu> <ID> <待浏览|可写|略过|已发布> [备注]');
 }
 
 function help() {
-  console.log(`\n🌿 阿野图文工作流\n\n  node aye.js download                     下载云端新增稿件并更新本地状态\n  node aye.js review [all]                 生成未发布稿件的合并审阅页\n  node aye.js review set <来源> <ID> <结论> 记录审阅结论\n  node aye.js edit [--json]                列出可写、进行中的文章\n  node aye.js sync                         兼容旧命令：拉取文章库并更新状态\n  node aye.js overview                     更新文章总览\n  node aye.js open <文章ID>                直接打开当前应编辑的稿件\n  node aye.js candidates [--json]          列出全部原始内容\n  node aye.js prepare xiaoshu <记录ID>     将小树记录复制为待确认稿\n  node aye.js list [--json]                列出文章队列\n  node aye.js migrate                      迁移旧文件到 0-4 阶段目录\n  node aye.js confirm <文章ID>             将待确认稿复制为发布文稿\n\n  审阅结论：待浏览、可写、略过、已发布；来源：article 或 xiaoshu\n`);
+  console.log(`\n🌿 阿野图文工作流\n\n  node aye.js download                     下载云端新增稿件并更新本地状态\n  node aye.js review [all]                 生成未发布稿件的合并审阅页\n  node aye.js review tag                   为已审稿件补齐自动标签\n  node aye.js review set <来源> <ID> <结论> 记录审阅结论、用途和自动标签\n  node aye.js edit [--json]                列出可独立修改、进行中的文章\n  node aye.js materials [标签...]          按自动标签查找关联素材\n  node aye.js sync                         兼容旧命令：拉取文章库并更新状态\n  node aye.js overview                     更新文章总览\n  node aye.js open <文章ID>                直接打开当前应编辑的稿件\n  node aye.js candidates [--json]          列出全部原始内容\n  node aye.js prepare xiaoshu <记录ID>     将小树记录复制为待确认稿\n  node aye.js list [--json]                列出文章队列\n  node aye.js migrate                      迁移旧文件到 0-4 阶段目录\n  node aye.js confirm <文章ID>             将待确认稿复制为发布文稿\n\n  审阅结论：待浏览、可写、略过、已发布；来源：article 或 xiaoshu\n`);
 }
 
 function main() {
@@ -534,6 +612,7 @@ function main() {
   if (command === 'download') { console.log(JSON.stringify(downloadArticles(), null, 2)); return; }
   if (command === 'review') { reviewCommand(args); return; }
   if (command === 'edit') { const items = listEditable(); if (args.includes('--json')) console.log(JSON.stringify(items, null, 2)); else console.table(items); return; }
+  if (command === 'materials') { const items = listMaterials(args); if (args.includes('--json')) console.log(JSON.stringify(items, null, 2)); else console.table(items); return; }
   if (command === 'sync') { const pull = gitPull(); const workflow = upsertFromFiles(); console.log(JSON.stringify({ pull, articles: Object.keys(workflow.articles).length }, null, 2)); return; }
   if (command === 'candidates') { const items = listCandidates(); if (args.includes('--json')) console.log(JSON.stringify(items, null, 2)); else console.table(items); return; }
   if (command === 'prepare' && args[0] === 'xiaoshu') { console.log(JSON.stringify(prepareXiaoshu(args[1]), null, 2)); return; }

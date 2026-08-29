@@ -19,6 +19,7 @@ function Show-Help {
   aye download  下载云端新增稿件
   aye review    生成并打开未发布稿件的审阅页
   aye edit      列出可写、正在修改的文章
+  aye materials 按标签查找关联素材
   aye start     兼容旧命令：下载后打开审阅页
   aye overview  更新并打开文章总览
   aye open <ID> 直接打开这篇文章当前应编辑的稿件
@@ -54,6 +55,10 @@ switch ($Command) {
     "edit" {
         Set-Location $WORKFLOW_DIR
         node aye.js edit @CommandArgs
+    }
+    "materials" {
+        Set-Location $WORKFLOW_DIR
+        node aye.js materials @CommandArgs
     }
     "list" {
         Set-Location $WORKFLOW_DIR

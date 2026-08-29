@@ -26,8 +26,9 @@ workflow.json         唯一状态来源
 
 1. 用户说「下载文章」：运行 `node aye.js download`，只拉取云端新增内容并更新本地索引，不修改原稿。
 2. 用户说「开始审稿」：运行 `node aye.js review`，生成 `articles/选题审阅.md`。该页合并本地原稿与小树资料，默认隐藏已发布稿件。
-3. 用户逐篇给出「可写 / 略过 / 已发布」结论时：运行 `node aye.js review set <article|xiaoshu> <ID> <结论> [备注]`。结论写入 `workflow.json` 的 `reviews`，不覆盖原文。
-4. 用户说「修改文章」：运行 `node aye.js edit --json`，只列出标为「可写」及已处于「优化待确认」的内容；等待用户指定单篇 ID。
+3. 用户逐篇给出「可写 / 略过 / 已发布」结论时：运行 `node aye.js review set <article|xiaoshu> <ID> <结论> [备注]`。系统从全文、标题、判断点和用户备注中自动生成主题/情绪标签与素材用途，写入 `workflow.json` 的 `reviews`，不覆盖原文。
+4. 「略过」不等于删除：备注含“素材、合并、关联、不单独”时，自动标记为「关联素材」，从文章修改清单移除但仍可按标签检索。
+5. 用户说「修改文章」：运行 `node aye.js edit --json`，只列出「独立文章」及已处于「优化待确认」的内容；等待用户指定单篇 ID。需要补充材料时运行 `node aye.js materials <标签>`。
 
 当用户说「开始改文章」或「处理新文章」：
 
