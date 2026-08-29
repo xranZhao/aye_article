@@ -22,6 +22,7 @@ const STAGES = {
   assets: join(ARTICLES, '4-素材与封面'),
 };
 const WORKFLOW_FILE = join(ARTICLES, 'workflow.json');
+const OVERVIEW_FILE = join(ARTICLES, '文章总览.md');
 const XIAOSHU_ROOT = join(ARTICLES, '5-小树觉察库');
 const XIAOSHU_TYPES = {
   awareness: '觉察日记',
@@ -85,6 +86,39 @@ function metaFor(id) {
   return {};
 }
 
+function currentArticleFile(article) {
+  if (article.status === 'pending' && article.pending?.path) return article.pending.path;
+  if (article.published?.path) return article.published.path;
+  if (article.pending?.path) return article.pending.path;
+  if (article.raw?.path) return article.raw.path;
+  return '';
+}
+
+function writeOverview(workflow) {
+  const articles = Object.values(workflow.articles)
+    .filter(article => article.raw || article.pending || article.published)
+    .sort((a, b) => String(b.published?.updatedAt || b.pending?.updatedAt || b.raw?.updatedAt || '')
+      .localeCompare(String(a.published?.updatedAt || a.pending?.updatedAt || a.raw?.updatedAt || '')));
+  const lines = [
+    '# 文章总览',
+    '',
+    '> 日常只打开这一页。它由 `workflow.json` 自动生成，不要手动修改。',
+    '> 想直接打开当前稿：`./aye.ps1 open 文章ID`。',
+    '',
+    '| 文章 | 状态 | 当前文件 |',
+    '|---|---|---|',
+  ];
+  for (const article of articles) {
+    const target = currentArticleFile(article);
+    const label = target ? basename(target) : '暂无可编辑文件';
+    const link = target ? `[${label}](file:///${target.replace(/\\/gu, '/')})` : label;
+    lines.push(`| ${article.id}｜${article.title || '未命名'} | ${STAGE_LABELS[article.status] || article.status} | ${link} |`);
+  }
+  if (articles.length === 0) lines.push('| 暂无文章 | — | — |');
+  lines.push('', '## 文件夹说明', '', '- `0-原始文稿`：原稿存档，不直接改。', '- `1-优化待确认`：需要你手动修改时，通常打开这里。', '- `2-发布文稿`：已经确认的定稿。', '- `3-公众号排版`：可复制到公众号的预览页。', '- `4-素材与封面`：照片、插画和封面成品。', '');
+  writeFileSync(OVERVIEW_FILE, lines.join('\n'), 'utf8');
+}
+
 function upsertFromFiles() {
   const workflow = loadWorkflow();
   for (const [stage, directory] of Object.entries(STAGES)) {
@@ -110,6 +144,7 @@ function upsertFromFiles() {
     }
   }
   saveWorkflow(workflow);
+  writeOverview(workflow);
   return workflow;
 }
 
@@ -161,6 +196,19 @@ function listArticles() {
       hasPhotos: article.photos?.length || 0
     }))
     .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
+}
+
+function openArticle(id) {
+  if (!id) throw new Error('请提供文章 ID');
+  const workflow = upsertFromFiles();
+  const article = workflow.articles[id];
+  if (!article) throw new Error(`找不到文章：${id}`);
+  const target = currentArticleFile(article);
+  if (!target || !existsSync(target)) throw new Error(`这篇文章暂时没有可打开的稿件：${id}`);
+  if (process.platform === 'win32') execFileSync('cmd', ['/c', 'start', '', target], { stdio: 'ignore' });
+  else if (process.platform === 'darwin') execFileSync('open', [target], { stdio: 'ignore' });
+  else execFileSync('xdg-open', [target], { stdio: 'ignore' });
+  return { id, path: target };
 }
 
 // 将手机原稿和小树记录放进同一份可选清单，原文始终保留在各自的归档位置。
@@ -349,7 +397,7 @@ function xiaoshuCommand(args) {
 }
 
 function help() {
-  console.log(`\n🌿 阿野图文工作流\n\n  node aye.js sync                         拉取文章库并更新状态\n  node aye.js candidates [--json]          列出全部可改写内容\n  node aye.js prepare xiaoshu <记录ID>     将小树记录复制为待确认稿\n  node aye.js list [--json]                列出手机文章队列\n  node aye.js migrate                      迁移旧文件到 0-4 阶段目录\n  node aye.js confirm <文章ID>             将待确认稿复制为发布文稿\n\n  node aye.js xiaoshu sync                 拉取并列出小树觉察记录\n  node aye.js xiaoshu list [选项]          列出本地小树觉察记录\n  node aye.js xiaoshu show <记录ID>        查看一条记录全文\n  node aye.js xiaoshu search <关键词>      搜索觉察材料\n\n  小树筛选选项：--type awareness|reverse|happy  --since 30d|YYYY-MM-DD  --json\n`);
+  console.log(`\n🌿 阿野图文工作流\n\n  node aye.js sync                         拉取文章库并更新状态\n  node aye.js overview                      更新文章总览\n  node aye.js open <文章ID>                 直接打开当前应编辑的稿件\n  node aye.js candidates [--json]          列出全部可改写内容\n  node aye.js prepare xiaoshu <记录ID>     将小树记录复制为待确认稿\n  node aye.js list [--json]                列出文章队列\n  node aye.js migrate                      迁移旧文件到 0-4 阶段目录\n  node aye.js confirm <文章ID>             将待确认稿复制为发布文稿\n\n  node aye.js xiaoshu sync                 拉取并列出小树觉察记录\n  node aye.js xiaoshu list [选项]          列出本地小树觉察记录\n  node aye.js xiaoshu show <记录ID>        查看一条记录全文\n  node aye.js xiaoshu search <关键词>      搜索觉察材料\n\n  小树筛选选项：--type awareness|reverse|happy  --since 30d|YYYY-MM-DD  --json\n`);
 }
 
 function main() {
@@ -360,6 +408,8 @@ function main() {
   if (command === 'prepare' && args[0] === 'xiaoshu') { console.log(JSON.stringify(prepareXiaoshu(args[1]), null, 2)); return; }
   if (command === 'migrate') { console.log(JSON.stringify(migrateLegacy(), null, 2)); return; }
   if (command === 'list') { const items = listArticles(); if (args.includes('--json')) console.log(JSON.stringify(items, null, 2)); else console.table(items); return; }
+  if (command === 'overview') { upsertFromFiles(); console.log(OVERVIEW_FILE); return; }
+  if (command === 'open') { console.log(JSON.stringify(openArticle(args[0]), null, 2)); return; }
   if (command === 'confirm') { console.log(JSON.stringify(confirmPublish(args[0]), null, 2)); return; }
   if (command === 'xiaoshu') { xiaoshuCommand(args); return; }
   help();

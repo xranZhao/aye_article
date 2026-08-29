@@ -17,6 +17,8 @@ function Show-Help {
 
 用法:
   aye start     拉取并列出全部可改写内容
+  aye overview  更新并打开文章总览
+  aye open <ID> 直接打开这篇文章当前应编辑的稿件
   aye list      列出所有文章及处理状态
   aye migrate   迁移历史文章到阶段目录
   aye xiaoshu   同步并列出小树觉察记录
@@ -38,6 +40,15 @@ switch ($Command) {
     "list" {
         Set-Location $WORKFLOW_DIR
         node aye.js list
+    }
+    "overview" {
+        Set-Location $WORKFLOW_DIR
+        node aye.js overview
+        Start-Process -FilePath (Join-Path $WORKFLOW_DIR 'articles\文章总览.md')
+    }
+    "open" {
+        Set-Location $WORKFLOW_DIR
+        node aye.js open @CommandArgs
     }
     "migrate" {
         Set-Location $WORKFLOW_DIR
