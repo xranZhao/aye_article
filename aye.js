@@ -23,6 +23,7 @@ const STAGES = {
 };
 const WORKFLOW_FILE = join(ARTICLES, 'workflow.json');
 const OVERVIEW_FILE = join(ARTICLES, '文章总览.md');
+const REVIEW_FILE = join(ARTICLES, '选题审阅.md');
 const XIAOSHU_ROOT = join(ARTICLES, '5-小树觉察库');
 const XIAOSHU_TYPES = {
   awareness: '觉察日记',
@@ -46,9 +47,9 @@ function loadWorkflow() {
   ensureLayout();
   try {
     const data = JSON.parse(readFileSync(WORKFLOW_FILE, 'utf8'));
-    return { version: 1, updatedAt: now(), articles: {}, ...data, articles: data.articles || {} };
+    return { version: 1, updatedAt: now(), articles: {}, reviews: {}, ...data, articles: data.articles || {}, reviews: data.reviews || {} };
   } catch {
-    return { version: 1, updatedAt: now(), articles: {} };
+    return { version: 1, updatedAt: now(), articles: {}, reviews: {} };
   }
 }
 function saveWorkflow(workflow) {
@@ -69,7 +70,8 @@ function isContentFile(name) { return /\.(md|html|txt)$/iu.test(name); }
 
 function gitPull() {
   try {
-    execFileSync('git', ['pull', '--ff-only'], { cwd: ARTICLES, stdio: 'pipe' });
+    // 下载时保留正在本地修改的稿件，避免新稿同步被未提交改动阻断。
+    execFileSync('git', ['pull', '--rebase', '--autostash'], { cwd: ARTICLES, stdio: 'pipe' });
     return { ok: true };
   } catch (error) {
     return { ok: false, error: error.stderr?.toString().trim() || error.message };
@@ -221,6 +223,7 @@ function listCandidates() {
     createdAt: article.uploadedAt,
     words: article.words,
     status: article.status,
+    path: loadWorkflow().articles[article.id]?.raw?.path || '',
   }));
   const xiaoshu = loadXiaoshuEntries().map(entry => ({
     source: entry.typeLabel,
@@ -230,9 +233,119 @@ function listCandidates() {
     createdAt: entry.createdAt,
     words: entry.words,
     status: '可改写',
+    path: entry.path,
+    body: entry.body,
   }));
   return [...mobile, ...xiaoshu]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+const REVIEW_DECISIONS = {
+  unreviewed: '待浏览',
+  write: '可写',
+  skip: '略过',
+  published: '已发布',
+};
+
+function reviewKey(sourceKey, id) { return `${sourceKey}:${id}`; }
+
+function normalizeReviewDecision(value) {
+  const aliases = {
+    '待浏览': 'unreviewed', unreviewed: 'unreviewed',
+    '可写': 'write', write: 'write',
+    '略过': 'skip', skip: 'skip',
+    '已发布': 'published', published: 'published',
+  };
+  const result = aliases[value];
+  if (!result) throw new Error('审阅结论只能是：待浏览、可写、略过、已发布');
+  return result;
+}
+
+function excerpt(text, limit = 72) {
+  return text.replace(/^---[\s\S]*?---\s*/u, '').replace(/[#>*_`\r\n]+/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, limit);
+}
+
+function reviewRows(includePublished = false) {
+  const workflow = upsertFromFiles();
+  return listCandidates().map((candidate, index) => {
+    const key = reviewKey(candidate.sourceKey, candidate.id);
+    const review = workflow.reviews[key];
+    const article = candidate.sourceKey === 'article' ? workflow.articles[candidate.id] : null;
+    const automatic = article?.status === 'pending' ? '进行中'
+      : article?.status === 'wechat' || article?.status === 'cover' ? '待确认发布'
+        : '';
+    const decision = review?.decision || (automatic || '待浏览');
+    const text = candidate.body || (candidate.path && existsSync(candidate.path) ? readFileSync(candidate.path, 'utf8') : '');
+    return {
+      ...candidate,
+      number: index + 1,
+      key,
+      decision,
+      reviewNote: review?.note || '',
+      reviewedAt: review?.reviewedAt || '',
+      processStatus: article ? (STAGE_LABELS[article.status] || article.status) : '原始素材',
+      summary: excerpt(text),
+    };
+  }).filter(row => includePublished || row.decision !== REVIEW_DECISIONS.published);
+}
+
+function writeReviewReport(includePublished = false) {
+  const rows = reviewRows(includePublished);
+  const groups = [
+    ['待浏览', rows.filter(row => row.decision === '待浏览')],
+    ['可写', rows.filter(row => row.decision === '可写')],
+    ['进行中 / 待确认发布', rows.filter(row => row.decision === '进行中' || row.decision === '待确认发布')],
+    ['略过', rows.filter(row => row.decision === '略过')],
+  ];
+  if (includePublished) groups.push(['已发布', rows.filter(row => row.decision === '已发布')]);
+  const lines = [
+    '# 选题审阅',
+    '',
+    '> 本页合并显示 `0-原始文稿` 与 `5-小树资料库`。默认隐藏已发布稿；用 `./aye.ps1 review all` 查看全部。',
+    '> 在对话里说「第 N 篇可写 / 略过 / 已发布」即可记录结论。原稿不会被修改。',
+    '',
+  ];
+  for (const [label, items] of groups) {
+    lines.push(`## ${label}（${items.length}）`, '');
+    if (items.length === 0) { lines.push('暂无。', ''); continue; }
+    lines.push('| # | 来源 | 标题 | 字数 | 处理状态 | 摘要 | 结论 |', '|---:|---|---|---:|---|---|---|');
+    for (const row of items) {
+      const title = String(row.title || '未命名').replace(/\|/gu, '｜');
+      const source = row.source.replace(/\|/gu, '｜');
+      const link = row.path ? `[${title}](file:///${row.path.replace(/\\/gu, '/')})` : title;
+      const note = row.reviewNote ? `（${row.reviewNote.replace(/\|/gu, '｜')}）` : '';
+      lines.push(`| ${row.number} | ${source} | ${link}<br><sub>${row.id}</sub> | ${row.words} | ${row.processStatus} | ${row.summary.replace(/\|/gu, '｜')} | ${row.decision}${note} |`);
+    }
+    lines.push('');
+  }
+  writeFileSync(REVIEW_FILE, lines.join('\n'), 'utf8');
+  return { file: REVIEW_FILE, total: rows.length };
+}
+
+function setReviewDecision(sourceKey, id, decisionInput, note = '') {
+  if (!['article', 'xiaoshu'].includes(sourceKey)) throw new Error('来源只能是 article 或 xiaoshu');
+  const candidates = listCandidates();
+  if (!candidates.some(item => item.sourceKey === sourceKey && item.id === String(id))) throw new Error(`找不到稿件：${sourceKey}:${id}`);
+  const workflow = loadWorkflow();
+  const decision = normalizeReviewDecision(decisionInput);
+  workflow.reviews[reviewKey(sourceKey, id)] = { decision, reviewedAt: now(), note };
+  saveWorkflow(workflow);
+  writeReviewReport(false);
+  return { source: sourceKey, id: String(id), decision: REVIEW_DECISIONS[decision], note };
+}
+
+function listEditable() {
+  return reviewRows(false)
+    .filter(row => row.decision === '可写' || row.decision === '进行中')
+    .map(({ source, sourceKey, id, title, words, processStatus, decision }) => ({ source, sourceKey, id, title, words, processStatus, decision }));
+}
+
+function downloadArticles() {
+  const before = { raw: walkMarkdown(STAGES.raw).length, xiaoshu: walkMarkdown(XIAOSHU_ROOT).length };
+  const pull = gitPull();
+  const workflow = upsertFromFiles();
+  const after = { raw: walkMarkdown(STAGES.raw).length, xiaoshu: walkMarkdown(XIAOSHU_ROOT).length };
+  return { pull, added: { raw: after.raw - before.raw, xiaoshu: after.xiaoshu - before.xiaoshu }, total: after, articles: Object.keys(workflow.articles).length };
 }
 
 function prepareXiaoshu(id) {
@@ -396,13 +509,31 @@ function xiaoshuCommand(args) {
   throw new Error(`未知的小树命令：${subcommand}`);
 }
 
+function reviewCommand(args) {
+  const [subcommand = 'list', ...rest] = args;
+  if (subcommand === 'list' || subcommand === 'all') {
+    const report = writeReviewReport(subcommand === 'all');
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  if (subcommand === 'set') {
+    const [sourceKey, id, decision, ...noteParts] = rest;
+    console.log(JSON.stringify(setReviewDecision(sourceKey, id, decision, noteParts.join(' ')), null, 2));
+    return;
+  }
+  throw new Error('审阅命令：review [list|all] 或 review set <article|xiaoshu> <ID> <待浏览|可写|略过|已发布> [备注]');
+}
+
 function help() {
-  console.log(`\n🌿 阿野图文工作流\n\n  node aye.js sync                         拉取文章库并更新状态\n  node aye.js overview                      更新文章总览\n  node aye.js open <文章ID>                 直接打开当前应编辑的稿件\n  node aye.js candidates [--json]          列出全部可改写内容\n  node aye.js prepare xiaoshu <记录ID>     将小树记录复制为待确认稿\n  node aye.js list [--json]                列出文章队列\n  node aye.js migrate                      迁移旧文件到 0-4 阶段目录\n  node aye.js confirm <文章ID>             将待确认稿复制为发布文稿\n\n  node aye.js xiaoshu sync                 拉取并列出小树觉察记录\n  node aye.js xiaoshu list [选项]          列出本地小树觉察记录\n  node aye.js xiaoshu show <记录ID>        查看一条记录全文\n  node aye.js xiaoshu search <关键词>      搜索觉察材料\n\n  小树筛选选项：--type awareness|reverse|happy  --since 30d|YYYY-MM-DD  --json\n`);
+  console.log(`\n🌿 阿野图文工作流\n\n  node aye.js download                     下载云端新增稿件并更新本地状态\n  node aye.js review [all]                 生成未发布稿件的合并审阅页\n  node aye.js review set <来源> <ID> <结论> 记录审阅结论\n  node aye.js edit [--json]                列出可写、进行中的文章\n  node aye.js sync                         兼容旧命令：拉取文章库并更新状态\n  node aye.js overview                     更新文章总览\n  node aye.js open <文章ID>                直接打开当前应编辑的稿件\n  node aye.js candidates [--json]          列出全部原始内容\n  node aye.js prepare xiaoshu <记录ID>     将小树记录复制为待确认稿\n  node aye.js list [--json]                列出文章队列\n  node aye.js migrate                      迁移旧文件到 0-4 阶段目录\n  node aye.js confirm <文章ID>             将待确认稿复制为发布文稿\n\n  审阅结论：待浏览、可写、略过、已发布；来源：article 或 xiaoshu\n`);
 }
 
 function main() {
   const [command = 'help', ...args] = process.argv.slice(2);
   if (!existsSync(ARTICLES)) throw new Error(`找不到文章库：${ARTICLES}`);
+  if (command === 'download') { console.log(JSON.stringify(downloadArticles(), null, 2)); return; }
+  if (command === 'review') { reviewCommand(args); return; }
+  if (command === 'edit') { const items = listEditable(); if (args.includes('--json')) console.log(JSON.stringify(items, null, 2)); else console.table(items); return; }
   if (command === 'sync') { const pull = gitPull(); const workflow = upsertFromFiles(); console.log(JSON.stringify({ pull, articles: Object.keys(workflow.articles).length }, null, 2)); return; }
   if (command === 'candidates') { const items = listCandidates(); if (args.includes('--json')) console.log(JSON.stringify(items, null, 2)); else console.table(items); return; }
   if (command === 'prepare' && args[0] === 'xiaoshu') { console.log(JSON.stringify(prepareXiaoshu(args[1]), null, 2)); return; }

@@ -16,7 +16,10 @@ function Show-Help {
 🌿 阿野IP内容工作流
 
 用法:
-  aye start     拉取并列出全部可改写内容
+  aye download  下载云端新增稿件
+  aye review    生成并打开未发布稿件的审阅页
+  aye edit      列出可写、正在修改的文章
+  aye start     兼容旧命令：下载后打开审阅页
   aye overview  更新并打开文章总览
   aye open <ID> 直接打开这篇文章当前应编辑的稿件
   aye list      列出所有文章及处理状态
@@ -29,13 +32,28 @@ function Show-Help {
 switch ($Command) {
     "start" {
         Set-Location $WORKFLOW_DIR
-        node aye.js sync
-        node aye.js candidates
+        node aye.js download
+        node aye.js review
+        Start-Process -FilePath (Join-Path $WORKFLOW_DIR 'articles\选题审阅.md')
     }
     "workflow" {
         Set-Location $WORKFLOW_DIR
-        node aye.js sync
-        node aye.js candidates
+        node aye.js download
+        node aye.js review
+        Start-Process -FilePath (Join-Path $WORKFLOW_DIR 'articles\选题审阅.md')
+    }
+    "download" {
+        Set-Location $WORKFLOW_DIR
+        node aye.js download
+    }
+    "review" {
+        Set-Location $WORKFLOW_DIR
+        node aye.js review @CommandArgs
+        Start-Process -FilePath (Join-Path $WORKFLOW_DIR 'articles\选题审阅.md')
+    }
+    "edit" {
+        Set-Location $WORKFLOW_DIR
+        node aye.js edit @CommandArgs
     }
     "list" {
         Set-Location $WORKFLOW_DIR
