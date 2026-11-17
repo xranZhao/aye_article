@@ -68,6 +68,18 @@ function fileInfo(filePath) {
 function stageFile(stage, id, extension = '.md') { return join(STAGES[stage], `${id}${extension}`); }
 function isContentFile(name) { return /\.(md|html|txt)$/iu.test(name); }
 
+// 原始文稿允许按作者、主题等继续分文件夹保存；同步时仍需全部纳入工作流。
+function walkContentFiles(directory) {
+  if (!existsSync(directory)) return [];
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...walkContentFiles(path));
+    else if (entry.isFile() && isContentFile(entry.name) && !entry.name.endsWith('.meta.json')) files.push(path);
+  }
+  return files;
+}
+
 function gitPull() {
   try {
     // 下载时保留正在本地修改的稿件，避免新稿同步被未提交改动阻断。
@@ -78,8 +90,13 @@ function gitPull() {
   }
 }
 
-function metaFor(id) {
-  const candidates = [join(STAGES.raw, `${id}.meta.json`), join(STAGES.raw, `${id}.md.meta.json`)];
+function metaFor(id, rawPath = '') {
+  const candidates = [
+    rawPath && join(dirname(rawPath), `${id}.meta.json`),
+    rawPath && `${rawPath}.meta.json`,
+    join(STAGES.raw, `${id}.meta.json`),
+    join(STAGES.raw, `${id}.md.meta.json`),
+  ].filter(Boolean);
   for (const path of candidates) {
     if (existsSync(path)) {
       try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return {}; }
@@ -125,8 +142,11 @@ function upsertFromFiles() {
   const workflow = loadWorkflow();
   for (const [stage, directory] of Object.entries(STAGES)) {
     if (!existsSync(directory)) continue;
-    for (const name of readdirSync(directory)) {
-      const path = join(directory, name);
+    const paths = stage === 'raw'
+      ? walkContentFiles(directory)
+      : readdirSync(directory).map(name => join(directory, name));
+    for (const path of paths) {
+      const name = basename(path);
       if (!statSync(path).isFile() || !isContentFile(name) || name.endsWith('.meta.json')) continue;
       const id = articleId(name);
       if (!id) continue;
@@ -134,7 +154,7 @@ function upsertFromFiles() {
       article.title = id.replace(/^\d{6}[_-]?/u, '');
       if (stage === 'raw' && /\.(md|txt)$/iu.test(name)) {
         article.raw = fileInfo(path);
-        const meta = metaFor(id);
+        const meta = metaFor(id, path);
         article.mobileStatus = meta.status || article.mobileStatus || 'needs_optimization';
         article.photos = meta.photos || article.photos || [];
         article.status = article.mobileStatus === 'final' ? 'final' : (article.status || 'raw');
@@ -271,6 +291,11 @@ const TAG_RULES = [
   ['愤怒', /愤怒|生气|气愤|凭什么/u],
   ['边界', /边界|拒绝|不妥|不得体/u],
   ['背叛怀疑', /背叛|怀疑|出轨|瞎搞/u],
+  ['社交媒体', /短视频|社交媒体|刷视频/u],
+  ['主体性', /主体性|保护.*边界|自己的人生/u],
+  ['幸福感', /幸福|安心|温暖|被养得很好/u],
+  ['匮乏感', /孤单|普通|感恩戴德|越想要|得不到/u],
+  ['理想化', /理想化|神仙一样|完美/u],
   ['表达恐惧', /发消息|表达.*需求|提需求|录屏|声音/u],
   ['躯体反应', /偏头痛|头痛|身体.*痛|太阳穴|失眠/u],
   ['睡眠', /睡觉|失眠|午睡|入睡|关灯/u],
@@ -293,9 +318,16 @@ function automaticTags(candidate, note = '') {
 
 function inferMaterialUse(decision, note = '') {
   if (decision === 'published') return '已发布';
-  if (/素材|合并|关联|一起写|不单独/u.test(note)) return '关联素材';
+  if (/不单独/u.test(note)) return '关联素材';
+  if (decision === 'write' && /素材积累|关联素材|补充素材|素材池|合并一起|一起使用|合并为.*文章/u.test(note)
+    && !/也可以写|可独立写|优先主题|主题定位|优先发布/u.test(note)) return '关联素材';
   if (decision === 'write') return '独立文章';
+  if (/素材|合并|关联|一起写/u.test(note)) return '关联素材';
   return '暂不使用';
+}
+
+function inferPriority(note = '') {
+  return /最高优先|优先发布|最高优先级/u.test(note) ? '最高' : '普通';
 }
 
 function excerpt(text, limit = 72) {
@@ -311,7 +343,8 @@ function reviewRows(includePublished = false) {
     const automatic = article?.status === 'pending' ? '进行中'
       : article?.status === 'wechat' || article?.status === 'cover' ? '待确认发布'
         : '';
-    const decision = review?.decision || (automatic || '待浏览');
+    const decisionCode = review?.decision || '';
+    const decision = review ? (REVIEW_DECISIONS[decisionCode] || '待浏览') : (automatic || '待浏览');
     const text = candidate.body || (candidate.path && existsSync(candidate.path) ? readFileSync(candidate.path, 'utf8') : '');
     return {
       ...candidate,
@@ -320,7 +353,8 @@ function reviewRows(includePublished = false) {
       decision,
       reviewNote: review?.note || '',
       reviewedAt: review?.reviewedAt || '',
-      materialUse: review?.materialUse || inferMaterialUse(review?.decision || 'unreviewed', review?.note || ''),
+      materialUse: review?.materialUse || inferMaterialUse(decisionCode || 'unreviewed', review?.note || ''),
+      priority: review?.priority || inferPriority(review?.note || ''),
       tags: review?.tags || automaticTags(candidate, review?.note || ''),
       processStatus: article ? (STAGE_LABELS[article.status] || article.status) : '原始素材',
       summary: excerpt(text),
@@ -354,7 +388,8 @@ function writeReviewReport(includePublished = false) {
       const link = row.path ? `[${title}](file:///${row.path.replace(/\\/gu, '/')})` : title;
       const note = row.reviewNote ? `（${row.reviewNote.replace(/\|/gu, '｜')}）` : '';
       const tags = row.tags.length ? row.tags.join('、') : '待生成';
-      lines.push(`| ${row.number} | ${source} | ${link}<br><sub>${row.id}</sub> | ${row.words} | ${row.processStatus} | ${row.summary.replace(/\|/gu, '｜')} | ${row.materialUse}<br><sub>${tags}</sub> | ${row.decision}${note} |`);
+      const priority = row.priority === '最高' ? '｜最高优先' : '';
+      lines.push(`| ${row.number} | ${source} | ${link}<br><sub>${row.id}</sub> | ${row.words} | ${row.processStatus} | ${row.summary.replace(/\|/gu, '｜')} | ${row.materialUse}${priority}<br><sub>${tags}</sub> | ${row.decision}${note} |`);
     }
     lines.push('');
   }
@@ -365,7 +400,8 @@ function writeReviewReport(includePublished = false) {
 function setReviewDecision(sourceKey, id, decisionInput, note = '') {
   if (!['article', 'xiaoshu'].includes(sourceKey)) throw new Error('来源只能是 article 或 xiaoshu');
   const candidates = listCandidates();
-  if (!candidates.some(item => item.sourceKey === sourceKey && item.id === String(id))) throw new Error(`找不到稿件：${sourceKey}:${id}`);
+  const candidate = candidates.find(item => item.sourceKey === sourceKey && item.id === String(id));
+  if (!candidate) throw new Error(`找不到稿件：${sourceKey}:${id}`);
   const workflow = loadWorkflow();
   const decision = normalizeReviewDecision(decisionInput);
   workflow.reviews[reviewKey(sourceKey, id)] = {
@@ -373,6 +409,7 @@ function setReviewDecision(sourceKey, id, decisionInput, note = '') {
     reviewedAt: now(),
     note,
     materialUse: inferMaterialUse(decision, note),
+    priority: inferPriority(note),
     tags: automaticTags(candidate, note),
   };
   saveWorkflow(workflow);
@@ -383,7 +420,8 @@ function setReviewDecision(sourceKey, id, decisionInput, note = '') {
 function listEditable() {
   return reviewRows(false)
     .filter(row => row.decision === '进行中' || (row.decision === '可写' && row.materialUse === '独立文章'))
-    .map(({ source, sourceKey, id, title, words, processStatus, decision, tags, materialUse }) => ({ source, sourceKey, id, title, words, processStatus, decision, materialUse, tags }));
+    .sort((a, b) => (a.priority === '最高' ? 0 : 1) - (b.priority === '最高' ? 0 : 1))
+    .map(({ source, sourceKey, id, title, words, processStatus, decision, tags, materialUse, priority }) => ({ source, sourceKey, id, title, words, processStatus, decision, materialUse, priority, tags }));
 }
 
 function backfillReviewTags() {
@@ -396,8 +434,9 @@ function backfillReviewTags() {
     if (!review) continue;
     const tags = automaticTags(candidate, review.note || '');
     const materialUse = inferMaterialUse(review.decision, review.note || '');
-    if (JSON.stringify(tags) !== JSON.stringify(review.tags || []) || materialUse !== review.materialUse) {
-      workflow.reviews[key] = { ...review, tags, materialUse };
+    const priority = inferPriority(review.note || '');
+    if (JSON.stringify(tags) !== JSON.stringify(review.tags || []) || materialUse !== review.materialUse || priority !== review.priority) {
+      workflow.reviews[key] = { ...review, tags, materialUse, priority };
       updated += 1;
     }
   }
@@ -409,7 +448,7 @@ function backfillReviewTags() {
 function listMaterials(tags = []) {
   const needles = tags.filter(tag => tag !== '--json').map(tag => tag.trim()).filter(Boolean);
   return reviewRows(false)
-    .filter(row => row.materialUse === '关联素材')
+    .filter(row => row.materialUse === '关联素材' || row.materialUse === '独立文章')
     .filter(row => needles.length === 0 || needles.every(tag => row.tags.includes(tag)))
     .map(({ source, sourceKey, id, title, words, tags: rowTags, reviewNote }) => ({ source, sourceKey, id, title, words, tags: rowTags, note: reviewNote }));
 }
